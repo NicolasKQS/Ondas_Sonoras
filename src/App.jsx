@@ -5,16 +5,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Toaster } from '@/components/ui/toaster';
 import { Button } from '@/components/ui/button';
 import { AudioProcessorProvider, useAudioContext } from '@/context/AudioProcessorContext';
-import { WaveTheory } from '@/components/WaveTheory';
+import { WaveTheoryAndApplications } from '@/components/WaveTheoryAndApplications';
 import { AudioAnalyzer } from '@/components/AudioAnalyzer';
 import { WaveSimulator } from '@/components/WaveSimulator';
-import { RealWorldApplications } from '@/components/RealWorldApplications';
 import { FunFacts } from '@/components/FunFacts';
 import { InteractiveGames } from '@/components/InteractiveGames';
 import { RelaxingSounds } from '@/components/RelaxingSounds';
 import { Navigation } from '@/components/Navigation';
 import { Hero } from '@/components/Hero';
-import { Brain, Music, Atom, Microscope as Telescope, Gamepad2, Info, Moon } from 'lucide-react';
+import { BookOpen, Music, Atom, Microscope as Telescope, Gamepad2, Info, Moon, BarChart3 } from 'lucide-react';
 
 const AboutModal = lazy(() => import('@/components/AboutModal'));
 
@@ -30,12 +29,11 @@ function AppContent() {
   const { activeTab, setActiveTab, isAboutModalOpen, setIsAboutModalOpen } = useAudioContext();
 
   const tabInfo = {
-    teoria: { icon: <Brain className="mr-2 h-5 w-5 text-blue-400" />, color: 'blue' },
-    analizador: { icon: <Music className="mr-2 h-5 w-5 text-green-400" />, color: 'green' },
-    simulador: { icon: <Atom className="mr-2 h-5 w-5 text-purple-400" />, color: 'purple' },
-    relajante: { icon: <Moon className="mr-2 h-5 w-5 text-indigo-400" />, color: 'indigo' },
-    aplicaciones: { icon: <Telescope className="mr-2 h-5 w-5 text-yellow-400" />, color: 'yellow' },
-    juegos: { icon: <Gamepad2 className="mr-2 h-5 w-5 text-pink-400" />, color: 'pink' },
+    explora: { icon: <BookOpen className="mr-2 h-5 w-5 text-blue-400" />, color: 'blue', label: 'Exploración de Ondas' },
+    analizador: { icon: <BarChart3 className="mr-2 h-5 w-5 text-green-400" />, color: 'green', label: 'Análisis Profesional' },
+    simulador: { icon: <Atom className="mr-2 h-5 w-5 text-purple-400" />, color: 'purple', label: 'Simulador Interactivo' },
+    universo: { icon: <Moon className="mr-2 h-5 w-5 text-indigo-400" />, color: 'indigo', label: 'Universo Sonoro' },
+    juegos: { icon: <Gamepad2 className="mr-2 h-5 w-5 text-pink-400" />, color: 'pink', label: 'Juegos Educativos' },
   };
 
   return (
@@ -53,7 +51,7 @@ function AppContent() {
         >
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="flex flex-wrap items-center justify-center gap-3 mb-10 p-2 rounded-xl bg-slate-900/50 backdrop-blur-md">
-              {Object.entries(tabInfo).map(([value, { icon, color }]) => (
+              {Object.entries(tabInfo).map(([value, { icon, color, label }]) => (
                 <TabsTrigger
                   key={value}
                   value={value}
@@ -67,12 +65,7 @@ function AppContent() {
                   `}
                 >
                   {icon}
-                  {value === 'teoria' && 'Teoría'}
-                  {value === 'analizador' && 'Analizador'}
-                  {value === 'simulador' && 'Simulador'}
-                  {value === 'relajante' && 'Universo Sonoro'}
-                  {value === 'aplicaciones' && 'Usos'}
-                  {value === 'juegos' && '¡A Jugar!'}
+                  {label}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -84,11 +77,10 @@ function AppContent() {
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3, ease: "easeInOut" }}
               >
-                <TabsContent value="teoria" forceMount={activeTab === 'teoria'}><WaveTheory /></TabsContent>
+                <TabsContent value="explora" forceMount={activeTab === 'explora'}><WaveTheoryAndApplications /></TabsContent>
                 <TabsContent value="analizador" forceMount={activeTab === 'analizador'}><AudioAnalyzer /></TabsContent>
                 <TabsContent value="simulador" forceMount={activeTab === 'simulador'}><WaveSimulator /></TabsContent>
-                <TabsContent value="relajante" forceMount={activeTab === 'relajante'}><RelaxingSounds /></TabsContent>
-                <TabsContent value="aplicaciones" forceMount={activeTab === 'aplicaciones'}><RealWorldApplications /></TabsContent>
+                <TabsContent value="universo" forceMount={activeTab === 'universo'}><RelaxingSounds /></TabsContent>
                 <TabsContent value="juegos" forceMount={activeTab === 'juegos'}><InteractiveGames /></TabsContent>
               </motion.div>
             </AnimatePresence>
@@ -100,7 +92,7 @@ function AppContent() {
       
       <Toaster />
       <footer className="py-8 text-center text-slate-400 text-sm">
-        <p>&copy; {new Date().getFullYear()} Física II Ondas Mágicas. ¡Diviértete Aprendiendo!</p>
+        <p>&copy; {new Date().getFullYear()} Física II: Ondas Estacionarias. Proyecto Educativo.</p>
         <Button variant="link" className="text-slate-400 hover:text-sky-400 mt-2" onClick={() => setIsAboutModalOpen(true)}>
           <Info className="mr-2 h-4 w-4" /> Acerca de este Proyecto
         </Button>

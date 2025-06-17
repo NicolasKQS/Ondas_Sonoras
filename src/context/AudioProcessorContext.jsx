@@ -1,13 +1,15 @@
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useRef } from 'react';
 import { useAudioProcessor } from '@/hooks/useAudioProcessor';
 
 const AudioProcessorContext = createContext(null);
 
 export function AudioProcessorProvider({ children }) {
-  const [activeTab, setActiveTab] = useState('teoria');
+  const [activeTab, setActiveTab] = useState('explora'); 
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
-  const audioProcessor = useAudioProcessor();
+  const lastTimeDomainDataRef = useRef(null);
+  const lastFrequencyDataRef = useRef(null);
+  const audioProcessor = useAudioProcessor(lastTimeDomainDataRef, lastFrequencyDataRef);
 
   const value = {
     ...audioProcessor,
@@ -15,6 +17,8 @@ export function AudioProcessorProvider({ children }) {
     setActiveTab,
     isAboutModalOpen,
     setIsAboutModalOpen,
+    lastTimeDomainDataRef, 
+    lastFrequencyDataRef,
   };
 
   return (

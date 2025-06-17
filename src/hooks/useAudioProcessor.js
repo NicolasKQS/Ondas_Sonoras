@@ -1,336 +1,364 @@
+
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useToast } from '@/components/ui/use-toast';
-import { generateWhiteNoise, generatePulsar, generateQuasar, generateRainSound, generateBlackHoleSound } from '@/lib/sound-presets';
+import { 
+    generateWhiteNoise, 
+    generatePulsar, 
+    generateQuasar, 
+    generateRainforestSound,
+    generateSecureThunderstormSound,
+    generateBlackHoleSound,
+    generateJupiterRadio,
+    generateCMBSound,
+    generateMarsQuakeSounds,
+    generateSynthesizedAurora,
+    generateWhaleSong,
+    generateSolarWind,
+    generateGeyserRhythm
+} from '@/lib/sound-presets';
+import { calculateLUFS, calculatePeakAmplitude, freqToNote } from '@/lib/audio-analysis';
+import { processAudioFile, startMicRecording, stopMicRecording } from '@/lib/audioInput';
+import { playAudioBuffer, stopAudioPlayback } from '@/lib/audioPlayback';
+import { analyzeAudioFrame } from '@/lib/audioAnalysisLoop';
+import { initializeAudioContext, destroyAudioContext } from '@/hooks/audioProcessor/audioContextManager';
+import { manageAudioPlayback, managePresetPlayback, manageUploadedAudioPlayback } from '@/hooks/audioProcessor/playbackManager';
+import { manageRecording } from '@/hooks/audioProcessor/recordingManager';
+import { generateReport, clearReport } from '@/hooks/audioProcessor/reportManager';
+import { updateVisualizations, clearVisualizations as clearVizFunc } from '@/hooks/audioProcessor/visualizationManager';
 
-const FFT_SIZE = 4096;
-const SMOOTHING_TIME_CONSTANT = 0.8;
+const FFT_SIZE = 2048; 
+const SMOOTHING_TIME_CONSTANT = 0.75; 
+const SPECTROGRAM_HISTORY_SIZE = 90; 
+const PIANO_ROLL_HISTORY_SIZE = 120; 
+const ANALYSIS_FRAME_THROTTLE = 1; 
 
-export function useAudioProcessor() {
+export function useAudioProcessor(lastTimeDomainDataRef, lastFrequencyDataRef) {
   const [isRecording, setIsRecording] = useState(false);
-  const [audioData, setAudioData] = useState(null);
-  const [audioBuffer, setAudioBuffer] = useState(null);
+  const [audioData, setAudioData] = useState(null); 
+  const [audioBuffer, setAudioBuffer] = useState(null); 
   const [fundamentalFreq, setFundamentalFreq] = useState(0);
   const [harmonics, setHarmonics] = useState([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [analysisReport, setAnalysisReport] = useState(null);
   const [playingPreset, setPlayingPreset] = useState(null);
+  const [spectrogramData, setSpectrogramData] = useState([]);
+  const [timeDomainDataForPianoRoll, setTimeDomainDataForPianoRoll] = useState([]);
+  const isMountedRef = useRef(false);
 
-  const mediaRecorderRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
-  const audioBufferSourceRef = useRef(null);
-  const mediaStreamSourceRef = useRef(null);
+  const audioSourceNodeRef = useRef(null); 
+  const mediaRecorderRef = useRef(null); 
+  
   const animationFrameRef = useRef(null);
-  const collectedFreqData = useRef([]);
+  const animationFrameCounterRef = useRef(0);
+  const collectedFreqDataRef = useRef([]);
+  const collectedBufferDataRef = useRef(null); 
+  const spectrogramHistoryRef = useRef([]);
+  const pianoRollHistoryRef = useRef([]);
+  const persistedSpectrogramDataRef = useRef([]);
+  const persistedPianoRollDataRef = useRef([]);
 
   const { toast } = useToast();
 
   const getAudioContext = useCallback(async () => {
-    if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-      try {
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        audioContextRef.current = new Ctx();
-        analyserRef.current = audioContextRef.current.createAnalyser();
-        analyserRef.current.fftSize = FFT_SIZE;
-        analyserRef.current.smoothingTimeConstant = SMOOTHING_TIME_CONSTANT;
-      } catch (e) {
-        toast({ title: "Error de Audio", description: "Tu navegador no soporta la Web Audio API.", variant: "destructive" });
-        return null;
-      }
-    }
-    if (audioContextRef.current.state === 'suspended') {
-      try { await audioContextRef.current.resume(); } 
-      catch (e) {
-        toast({ title: "Error de Audio", description: "Haz clic en la página para activar el audio.", variant: "destructive" });
-        return null;
-      }
-    }
-    return audioContextRef.current;
+    const context = await initializeAudioContext(audioContextRef, analyserRef, FFT_SIZE, SMOOTHING_TIME_CONSTANT, toast);
+    return context;
   }, [toast]);
-
-  const stopCurrentAudioPlayback = useCallback(() => {
-    if (audioBufferSourceRef.current) {
-      audioBufferSourceRef.current.onended = null;
-      try { audioBufferSourceRef.current.stop(); } catch(e) {}
-      audioBufferSourceRef.current.disconnect();
-      audioBufferSourceRef.current = null;
-    }
-    if (analyserRef.current && audioContextRef.current?.destination) {
-      try { analyserRef.current.disconnect(); } catch(e) {}
-    }
+  
+  const commonStopAudioActions = useCallback((persistAndShowVisualizations) => {
     setIsPlayingAudio(false);
-    setIsAnalyzing(false);
     setPlayingPreset(null);
-  }, []);
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (persistAndShowVisualizations) {
+        persistedSpectrogramDataRef.current = [...spectrogramHistoryRef.current];
+        persistedPianoRollDataRef.current = [...pianoRollHistoryRef.current];
+        setSpectrogramData([...persistedSpectrogramDataRef.current]);
+        setTimeDomainDataForPianoRoll([...persistedPianoRollDataRef.current]);
+    }
+    if (!isRecording) {
+      setIsAnalyzing(false);
+    }
+  }, [isRecording]);
 
-  const calculateFrequencies = useCallback((dataArray, sampleRate) => {
-    if (!analyserRef.current || !dataArray || !dataArray.length) return { fundamental: 0, harmonics: [] };
-    const bufferLength = analyserRef.current.frequencyBinCount;
-    let maxIndex = 0;
-    let maxValue = -Infinity;
-    for (let i = 1; i < bufferLength; i++) {
-      if (dataArray[i] > maxValue) {
-        maxValue = dataArray[i];
-        maxIndex = i;
-      }
-    }
-    const fundamental = (maxIndex * sampleRate) / analyserRef.current.fftSize;
-    if (fundamental > 20 && maxValue > 10) {
-      const harmonicsList = [];
-      for (let i = 2; i <= 8; i++) {
-        const hFreq = fundamental * i;
-        const hIndex = Math.round((hFreq * analyserRef.current.fftSize) / sampleRate);
-        if (hIndex < bufferLength && dataArray[hIndex] > 5) {
-          harmonicsList.push({ order: i, frequency: Math.round(hFreq), amplitude: dataArray[hIndex] });
-        }
-      }
-      return { fundamental: Math.round(fundamental), harmonics: harmonicsList };
-    }
-    return { fundamental: 0, harmonics: [] };
+  const stopCurrentAudio = useCallback((persistVisuals = true) => {
+    stopAudioPlayback(audioSourceNodeRef, analyserRef, audioContextRef);
+    commonStopAudioActions(persistVisuals);
+  }, [commonStopAudioActions]);
+  
+  const generateAndSetReport = useCallback(() => {
+    generateReport(collectedFreqDataRef, collectedBufferDataRef, setAnalysisReport, setFundamentalFreq, setHarmonics);
   }, []);
   
-  const generateReport = useCallback(() => {
-    if (collectedFreqData.current.length === 0) {
-      setAnalysisReport({ fundamentalFreq: 0, harmonics: [], peakFrequency: 0 });
-      return;
-    }
-    const aggregatedFrequencies = {};
-    collectedFreqData.current.forEach(dataPoint => {
-        if(dataPoint.fundamental > 0) {
-            if(!aggregatedFrequencies[dataPoint.fundamental]) aggregatedFrequencies[dataPoint.fundamental] = 0;
-            aggregatedFrequencies[dataPoint.fundamental]++;
-        }
-    });
-    let mainFundamental = 0;
-    let maxOccurrences = 0;
-    for (const freq in aggregatedFrequencies) {
-        if (aggregatedFrequencies[freq] > maxOccurrences) {
-            maxOccurrences = aggregatedFrequencies[freq];
-            mainFundamental = parseInt(freq, 10);
-        }
-    }
-    const finalFrame = collectedFreqData.current.length > 0 ? collectedFreqData.current[collectedFreqData.current.length - 1] : {harmonics:[]};
-    setAnalysisReport({
-      fundamentalFreq: mainFundamental,
-      harmonics: mainFundamental > 0 ? finalFrame.harmonics.filter(h => h.frequency/h.order - mainFundamental < 10) : [],
-    });
-    collectedFreqData.current = []; 
-  }, []);
+  const clearAnalysisReportHandler = useCallback(() => {
+    clearReport(setAnalysisReport, setFundamentalFreq, setHarmonics);
+    clearVizFunc(
+        setSpectrogramData, 
+        setTimeDomainDataForPianoRoll, 
+        persistedSpectrogramDataRef, 
+        persistedPianoRollDataRef,
+        spectrogramHistoryRef,
+        pianoRollHistoryRef,
+        lastTimeDomainDataRef,
+        lastFrequencyDataRef
+    );
+  }, [lastTimeDomainDataRef, lastFrequencyDataRef]);
 
   useEffect(() => {
-    let animationFrameId;
-    if (isAnalyzing) {
-      const bufferLength = analyserRef.current.frequencyBinCount;
-      const freqDataArray = new Uint8Array(bufferLength);
-      const timeDataArray = new Uint8Array(bufferLength);
-      
-      const analyze = () => {
-        if(!analyserRef.current) return;
-        analyserRef.current.getByteFrequencyData(freqDataArray);
-        analyserRef.current.getByteTimeDomainData(timeDataArray);
-        
-        const { fundamental, harmonics } = calculateFrequencies(freqDataArray, audioContextRef.current.sampleRate);
-        setFundamentalFreq(fundamental);
-        setHarmonics(harmonics);
-
-        if(isPlayingAudio) {
-          collectedFreqData.current.push({ fundamental, harmonics });
-        }
-
-        if (window.drawFrequencySpectrum) window.drawFrequencySpectrum(freqDataArray);
-        if (window.drawTimeDomainWaveform) window.drawTimeDomainWaveform(timeDataArray);
-
-        animationFrameId = requestAnimationFrame(analyze);
-        animationFrameRef.current = animationFrameId;
-      };
-      analyze();
-    }
+    isMountedRef.current = true;
     return () => {
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
+      isMountedRef.current = false;
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      destroyAudioContext(audioContextRef, mediaRecorderRef, audioSourceNodeRef, analyserRef);
+    };
+  }, []);
+
+
+  useEffect(() => { 
+    if (isAnalyzing && audioContextRef.current && analyserRef.current && isMountedRef.current) {
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = requestAnimationFrame(() => 
+        analyzeAudioFrame({
+          analyserNode: analyserRef.current,
+          audioCtx: audioContextRef.current,
+          isPlayingAudio, 
+          setFundamentalFreq, setHarmonics,
+          setSpectrogramData, setTimeDomainDataForPianoRoll,
+          spectrogramHistoryRef, pianoRollHistoryRef,
+          collectedFreqDataRef,
+          SPECTROGRAM_HISTORY_SIZE, PIANO_ROLL_HISTORY_SIZE,
+          animationFrameRef, isAnalyzingState: isAnalyzing,
+          animationFrameCounterRef, ANALYSIS_FRAME_THROTTLE,
+          isMountedRef,
+          lastTimeDomainDataRef,
+          lastFrequencyDataRef
+        })
+      );
+    } else {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
       }
-    };
-  }, [isAnalyzing, isPlayingAudio, calculateFrequencies]);
-
-
-  const playAudio = useCallback(async (bufferToPlay, presetName = null) => {
-    if (!bufferToPlay) return;
-    if (isPlayingAudio) stopCurrentAudioPlayback();
-    
-    setAnalysisReport(null);
-    const audioCtx = await getAudioContext();
-    if (!audioCtx) return;
-
-    audioBufferSourceRef.current = audioCtx.createBufferSource();
-    audioBufferSourceRef.current.buffer = bufferToPlay;
-    audioBufferSourceRef.current.connect(analyserRef.current);
-    analyserRef.current.connect(audioCtx.destination);
-    
-    collectedFreqData.current = [];
-    setIsPlayingAudio(true);
-    setIsAnalyzing(true);
-    if (presetName) setPlayingPreset(presetName);
-    
-    audioBufferSourceRef.current.onended = () => {
-      if(audioBufferSourceRef.current) { 
-        stopCurrentAudioPlayback();
-        generateReport();
-        toast({ title: "Análisis Completado", description: "Revisa el reporte con los resultados." });
+      if (!isPlayingAudio && isMountedRef.current) { 
+          setSpectrogramData([...persistedSpectrogramDataRef.current]);
+          setTimeDomainDataForPianoRoll([...persistedPianoRollDataRef.current]);
+          if (window.drawTimeDomainWaveform && lastTimeDomainDataRef.current) {
+            window.drawTimeDomainWaveform(lastTimeDomainDataRef.current);
+          }
+          if (window.drawFrequencySpectrum && lastFrequencyDataRef.current) {
+            window.drawFrequencySpectrum(lastFrequencyDataRef.current);
+          }
       }
+    }
+    return () => {
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
+  }, [isAnalyzing, isPlayingAudio, lastTimeDomainDataRef, lastFrequencyDataRef]);
+
+  const playDecodedAudio = useCallback(async (bufferToPlay, presetName = null) => {
+    if(!isMountedRef.current) return;
+    await manageAudioPlayback({
+        bufferToPlay, presetName,
+        stopCurrentAudio, setAnalysisReport,
+        spectrogramHistoryRef, pianoRollHistoryRef, collectedFreqDataRef,
+        getAudioContext, collectedBufferDataRef,
+        audioSourceNodeRef, analyserRef,
+        setIsPlayingAudio, setIsAnalyzing, setPlayingPreset,
+        toast, generateAndSetReport,
+        setSpectrogramData, setTimeDomainDataForPianoRoll, persistedSpectrogramDataRef, persistedPianoRollDataRef
+    });
+  }, [getAudioContext, stopCurrentAudio, generateAndSetReport, toast]);
+
+  const playUploadedAudioHandler = useCallback(async () => {
+    if(!isMountedRef.current) return;
+    await manageUploadedAudioPlayback(audioBuffer, playDecodedAudio, toast);
+  }, [audioBuffer, playDecodedAudio, toast]);
+
+  const playPresetHandler = useCallback(async (presetType) => {
+    if(!isMountedRef.current) return;
     
-    audioBufferSourceRef.current.start(0);
-    toast({ title: "Reproduciendo y Analizando...", description: presetName || "Audio cargado" });
-  }, [getAudioContext, stopCurrentAudioPlayback, generateReport, toast, isPlayingAudio]);
-  
-  const playUploadedAudio = useCallback(() => {
-    if (audioBuffer) playAudio(audioBuffer);
-    else toast({title: "No hay audio cargado", description: "Sube un archivo o graba con tu micrófono primero.", variant: "destructive"});
-  }, [audioBuffer, playAudio, toast]);
-  
-  const playPreset = useCallback(async (presetType) => {
     const audioCtx = await getAudioContext();
     if (!audioCtx) return;
+    stopCurrentAudio(false);
     toast({ title: `Generando ${presetType}...`, description: "¡Disfruta el viaje sónico!" });
     let generatedBuffer;
     try {
-        let duration = presetType.includes('ruido') || presetType.includes('pulsar') ? 5 : 10;
+        let duration = 10;
+        if (['ruidoBlanco', 'pulsarCosmico', 'radioJupiter'].includes(presetType)) duration = 7;
+        if (['ecoAgujeroNegro', 'fondoCosmico', 'meteoritosMarte', 'auroraSintetizada', 'vientoSolarSutil'].includes(presetType)) duration = 12;
+        if (['bosqueLluvioso', 'tormentaLejanaSegura', 'cantoBallenasProfundo', 'geiserRitmico'].includes(presetType)) duration = 15;
+
+
         switch (presetType) {
             case 'ruidoBlanco': generatedBuffer = await generateWhiteNoise(audioCtx, duration); break;
-            case 'lluvia': generatedBuffer = await generateRainSound(audioCtx, duration); break;
-            case 'pulsar': generatedBuffer = await generatePulsar(audioCtx, duration); break;
-            case 'quasar': generatedBuffer = await generateQuasar(audioCtx, duration); break;
-            case 'agujeroNegro': generatedBuffer = await generateBlackHoleSound(audioCtx, duration); break;
-            default: throw new Error("Preset de sonido desconocido");
+            case 'bosqueLluvioso': generatedBuffer = await generateRainforestSound(audioCtx, duration); break;
+            case 'tormentaLejanaSegura': generatedBuffer = await generateSecureThunderstormSound(audioCtx, duration); break;
+            case 'pulsarCosmico': generatedBuffer = await generatePulsar(audioCtx, duration); break;
+            case 'murmulloQuasar': generatedBuffer = await generateQuasar(audioCtx, duration); break;
+            case 'ecoAgujeroNegro': generatedBuffer = await generateBlackHoleSound(audioCtx, duration); break;
+            case 'radioJupiter': generatedBuffer = await generateJupiterRadio(audioCtx, duration); break;
+            case 'fondoCosmico': generatedBuffer = await generateCMBSound(audioCtx, duration); break;
+            case 'meteoritosMarte': generatedBuffer = await generateMarsQuakeSounds(audioCtx, duration); break;
+            case 'auroraSintetizada': generatedBuffer = await generateSynthesizedAurora(audioCtx, duration); break;
+            case 'cantoBallenasProfundo': generatedBuffer = await generateWhaleSong(audioCtx, duration); break;
+            case 'vientoSolarSutil': generatedBuffer = await generateSolarWind(audioCtx, duration); break;
+            case 'geiserRitmico': generatedBuffer = await generateGeyserRhythm(audioCtx, duration); break;
+            default: throw new Error("Preset de sonido desconocido: " + presetType);
         }
-        await playAudio(generatedBuffer, presetType);
+        if (!isMountedRef.current) return;
+        setAudioBuffer(generatedBuffer); 
+        await playDecodedAudio(generatedBuffer, presetType);
     } catch (error) {
-        toast({ title: "Error de Generación", description: `No se pudo crear el sonido: ${error.message}`, variant: "destructive" });
+        if (!isMountedRef.current) return;
+        console.error("Error playing preset:", error);
+        toast({ title: "Error de Generación", description: `No se pudo crear el sonido ${presetType}: ${error.message}`, variant: "destructive" });
+        stopCurrentAudio(true);
     }
-  }, [getAudioContext, playAudio, toast]);
-  
-  const processAudioData = useCallback(async (data) => {
-    stopCurrentAudioPlayback();
-    setAudioBuffer(null);
-    setAnalysisReport(null);
-    const audioCtx = await getAudioContext();
-    if (!audioCtx) return;
-    try {
-      toast({ title: "Procesando audio...", description: "Un momento, por favor." });
-      const arrayBuffer = await data.arrayBuffer();
-      const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-      setAudioBuffer(decodedBuffer);
-      toast({ title: "¡Listo para Analizar!", description: "Presiona 'Escuchar Audio' para empezar.", className: "bg-green-600 border-green-700 text-white" });
-    } catch (e) {
-      toast({ title: "Error de Procesamiento", description: `No se pudo procesar el audio: ${e.message}`, variant: "destructive" });
-      setAudioBuffer(null);
-    }
-  }, [stopCurrentAudioPlayback, getAudioContext, toast]);
+  }, [getAudioContext, playDecodedAudio, toast, stopCurrentAudio]);
 
-  const handleFileUpload = useCallback(async (event) => {
-    stopCurrentAudioPlayback();
+  const processAndSetAudio = useCallback(async (dataBlobOrFile) => { 
+    if(!isMountedRef.current) return;
+    stopCurrentAudio(false);
+    setAudioBuffer(null); 
     setAnalysisReport(null);
-    if (isRecording) mediaRecorderRef.current?.stop();
+    clearVizFunc(
+        setSpectrogramData, 
+        setTimeDomainDataForPianoRoll, 
+        persistedSpectrogramDataRef, 
+        persistedPianoRollDataRef,
+        spectrogramHistoryRef,
+        pianoRollHistoryRef,
+        lastTimeDomainDataRef,
+        lastFrequencyDataRef
+    );
+    
+    const audioCtx = await getAudioContext();
+    if (!audioCtx || !isMountedRef.current) return;
+
+    const result = await processAudioFile(audioCtx, dataBlobOrFile, toast);
+    if (result && isMountedRef.current) {
+      setAudioBuffer(result.decodedBuffer);
+      setAudioData(result.originalData); 
+      toast({ title: "Audio Listo", description: "Presione 'Escuchar Audio' para iniciar el análisis.", className: "bg-green-600 border-green-700 text-white" });
+    } else if (isMountedRef.current) {
+      setAudioBuffer(null);
+      setAudioData(null);
+    }
+  }, [stopCurrentAudio, getAudioContext, toast, lastTimeDomainDataRef, lastFrequencyDataRef]);
+
+  const handleFileUploadHandler = useCallback(async (event) => {
+    if(!isMountedRef.current) return;
+    stopCurrentAudio(false);
+    setAnalysisReport(null);
+    if (isRecording) await stopRecordingHandler("Grabación detenida por carga de archivo.");
+    
     const file = event.target.files[0];
     if (!file) return;
     if (!file.type.startsWith('audio/')) {
-      toast({ title: "Archivo Inválido", description: "Por favor, sube un archivo de audio.", variant: "destructive" });
+      toast({ title: "Archivo Inválido", description: "Por favor, seleccione un archivo de audio.", variant: "destructive" });
       return;
     }
-    setAudioData(file);
-    await processAudioData(file);
-    if (event.target) event.target.value = null;
-  }, [stopCurrentAudioPlayback, isRecording, processAudioData, toast]);
+    await processAndSetAudio(file);
+    if (event.target && isMountedRef.current) event.target.value = null; 
+  }, [stopCurrentAudio, isRecording, processAndSetAudio, toast]);
 
-  const startRecording = useCallback(async () => {
-    stopCurrentAudioPlayback();
-    setAudioBuffer(null);
-    setAudioData(null);
-    setAnalysisReport(null);
-    const audioCtx = await getAudioContext();
-    if (!audioCtx) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamSourceRef.current = audioCtx.createMediaStreamSource(stream);
-      mediaStreamSourceRef.current.connect(analyserRef.current);
-      mediaRecorderRef.current = new MediaRecorder(stream);
-      const chunks = [];
-      mediaRecorderRef.current.ondataavailable = (e) => chunks.push(e.data);
-      mediaRecorderRef.current.onstop = async () => {
-        const blob = new Blob(chunks, { type: 'audio/wav' });
-        setAudioData(blob);
-        await processAudioData(blob);
-      };
-      mediaRecorderRef.current.start();
-      setIsRecording(true);
-      setIsAnalyzing(true);
-      toast({ title: "Grabación iniciada..." });
-    } catch (error) {
-      toast({ title: "Error de Micrófono", description: `No se pudo acceder al micrófono: ${error.message}`, variant: "destructive" });
-      setIsRecording(false);
-      setIsAnalyzing(false);
-    }
-  }, [stopCurrentAudioPlayback, getAudioContext, processAudioData, toast]);
+  const startRecordingHandler = useCallback(async () => {
+    if(!isMountedRef.current) return;
+    await manageRecording.start({
+        stopCurrentAudio: () => stopCurrentAudio(false), 
+        setAudioBuffer, setAudioData, setAnalysisReport,
+        clearVisualizations: () => clearVizFunc(
+            setSpectrogramData, setTimeDomainDataForPianoRoll, 
+            persistedSpectrogramDataRef, persistedPianoRollDataRef,
+            spectrogramHistoryRef, pianoRollHistoryRef,
+            lastTimeDomainDataRef, lastFrequencyDataRef
+        ),
+        getAudioContext, analyserRef, mediaRecorderRef,
+        setIsRecording, setIsAnalyzing, toast, processAndSetAudio,
+        audioSourceNodeRef
+    });
+  }, [stopCurrentAudio, getAudioContext, processAndSetAudio, toast, lastTimeDomainDataRef, lastFrequencyDataRef]);
 
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      setIsAnalyzing(false);
-      if (mediaStreamSourceRef.current) {
-        mediaStreamSourceRef.current.mediaStream.getTracks().forEach(track => track.stop());
-        mediaStreamSourceRef.current.disconnect();
-        mediaStreamSourceRef.current = null;
-      }
-      toast({ title: "Grabación detenida", description: "Procesando..." });
-    }
-  }, [isRecording, toast]);
+  const stopRecordingHandler = useCallback(async (stopMessage) => {
+    if(!isMountedRef.current) return;
+    await manageRecording.stop({
+        mediaRecorderRef, setIsRecording, audioSourceNodeRef, toast, 
+        isPlayingAudio, setIsAnalyzing, stopMessage,
+        setSpectrogramData, setTimeDomainDataForPianoRoll,
+        persistedSpectrogramDataRef, persistedPianoRollDataRef,
+        spectrogramHistoryRef, pianoRollHistoryRef,
+        lastTimeDomainDataRef, lastFrequencyDataRef
+    });
+  }, [toast, isPlayingAudio, lastTimeDomainDataRef, lastFrequencyDataRef]);
   
-  const clearAnalysisReport = useCallback(() => {
-    setAnalysisReport(null);
-    setFundamentalFreq(0);
-    setHarmonics([]);
-  }, []);
-
-  const loadPresetForAnalysis = useCallback(async (presetType) => {
-    stopCurrentAudioPlayback();
+  const loadPresetForAnalysisHandler = useCallback(async (presetType) => {
+    if(!isMountedRef.current) return;
+    stopCurrentAudio(false);
     const audioCtx = await getAudioContext();
-    if (!audioCtx) return;
-    toast({ title: `Generando ${presetType}...`, description: "Esto es ciencia en acción, ¡un momento!" });
+    if (!audioCtx || !isMountedRef.current) return;
+    toast({ title: `Cargando ${presetType} para análisis...`, description: "Por favor, espere." });
     let generatedBuffer;
     try {
+        let duration = 5; 
+        if (['ecoAgujeroNegro', 'fondoCosmico', 'meteoritosMarte', 'auroraSintetizada', 'vientoSolarSutil'].includes(presetType)) duration = 8;
+        if (['radioJupiter', 'cantoBallenasProfundo', 'geiserRitmico'].includes(presetType)) duration = 7;
+        if (['bosqueLluvioso', 'tormentaLejanaSegura'].includes(presetType)) duration = 10;
+
+
         switch (presetType) {
             case 'ruidoBlanco': generatedBuffer = await generateWhiteNoise(audioCtx, 3); break;
-            case 'lluvia': generatedBuffer = await generateRainSound(audioCtx, 5); break;
-            case 'pulsar': generatedBuffer = await generatePulsar(audioCtx, 3); break;
-            case 'quasar': generatedBuffer = await generateQuasar(audioCtx, 5); break;
-            case 'agujeroNegro': generatedBuffer = await generateBlackHoleSound(audioCtx, 6); break;
-            default: throw new Error("Preset de sonido desconocido");
+            case 'bosqueLluvioso': generatedBuffer = await generateRainforestSound(audioCtx, duration); break;
+            case 'tormentaLejanaSegura': generatedBuffer = await generateSecureThunderstormSound(audioCtx, duration); break;
+            case 'pulsarCosmico': generatedBuffer = await generatePulsar(audioCtx, 3); break;
+            case 'murmulloQuasar': generatedBuffer = await generateQuasar(audioCtx, duration); break;
+            case 'ecoAgujeroNegro': generatedBuffer = await generateBlackHoleSound(audioCtx, duration); break;
+            case 'radioJupiter': generatedBuffer = await generateJupiterRadio(audioCtx, duration); break;
+            case 'fondoCosmico': generatedBuffer = await generateCMBSound(audioCtx, duration); break;
+            case 'meteoritosMarte': generatedBuffer = await generateMarsQuakeSounds(audioCtx, duration); break;
+            case 'auroraSintetizada': generatedBuffer = await generateSynthesizedAurora(audioCtx, duration); break;
+            case 'cantoBallenasProfundo': generatedBuffer = await generateWhaleSong(audioCtx, duration); break;
+            case 'vientoSolarSutil': generatedBuffer = await generateSolarWind(audioCtx, duration); break;
+            case 'geiserRitmico': generatedBuffer = await generateGeyserRhythm(audioCtx, duration); break;
+            default: throw new Error("Preset de sonido desconocido: " + presetType);
         }
+        if (!isMountedRef.current) return;
         setAudioBuffer(generatedBuffer);
-        toast({ title: "¡Sonido Cósmico Listo!", description: "Ve al Analizador y presiona 'Escuchar Audio'.", className: "bg-indigo-600 border-indigo-700 text-white" });
+        setAudioData(null); 
+        clearVizFunc(
+            setSpectrogramData, 
+            setTimeDomainDataForPianoRoll, 
+            persistedSpectrogramDataRef, 
+            persistedPianoRollDataRef,
+            spectrogramHistoryRef,
+            pianoRollHistoryRef,
+            lastTimeDomainDataRef,
+            lastFrequencyDataRef
+        );
+        toast({ title: `Preset ${presetType} cargado.`, description: "Vaya al Analizador y presione 'Escuchar Audio'.", className: "bg-indigo-600 border-indigo-700 text-white" });
     } catch (error) {
-        toast({ title: "Error de Generación", description: `No se pudo crear el sonido: ${error.message}`, variant: "destructive" });
+        if (!isMountedRef.current) return;
+        console.error("Error loading preset:", error);
+        toast({ title: "Error de Carga", description: `No se pudo cargar el preset ${presetType}: ${error.message}`, variant: "destructive" });
     }
-  }, [getAudioContext, stopCurrentAudioPlayback, toast]);
+  }, [getAudioContext, stopCurrentAudio, toast, lastTimeDomainDataRef, lastFrequencyDataRef]);
 
-  useEffect(() => {
-    return () => {
-      stopCurrentAudioPlayback();
-      if (mediaRecorderRef.current?.stream) {
-        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      }
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close().catch(() => {});
-      }
-    };
-  }, [stopCurrentAudioPlayback]);
 
   return {
     isRecording, audioBuffer, audioData, fundamentalFreq, harmonics, isAnalyzing, isPlayingAudio, analysisReport, playingPreset,
-    startRecording, stopRecording, playUploadedAudio, stopCurrentAudioPlayback, handleFileUpload, clearAnalysisReport,
-    loadPresetForAnalysis, playPreset,
+    spectrogramData, timeDomainDataForPianoRoll,
+    startRecording: startRecordingHandler, 
+    stopRecording: stopRecordingHandler, 
+    playUploadedAudio: playUploadedAudioHandler, 
+    stopCurrentAudioPlayback: stopCurrentAudio, 
+    handleFileUpload: handleFileUploadHandler, 
+    clearAnalysisReport: clearAnalysisReportHandler,
+    loadPresetForAnalysis: loadPresetForAnalysisHandler, 
+    playPreset: playPresetHandler,
+    lastTimeDomainDataRef,
+    lastFrequencyDataRef,
   };
 }

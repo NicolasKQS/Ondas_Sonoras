@@ -1,28 +1,33 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Lightbulb, Zap, Star } from 'lucide-react';
+import { Lightbulb, Zap, Star, Feather } from 'lucide-react';
 
 const facts = [
   {
     icon: <Lightbulb className="text-yellow-400 h-8 w-8" />,
-    text: "¿Sabías que las microondas en tu cocina usan ondas estacionarias para calentar la comida de manera uniforme? ¡Es ciencia en tu plato!",
+    text: "Los hornos de microondas utilizan ondas estacionarias para calentar los alimentos de manera uniforme. Es un principio físico aplicado en la cocina.",
     color: "yellow"
   },
   {
     icon: <Zap className="text-sky-400 h-8 w-8" />,
-    text: "Los láseres también pueden formar ondas estacionarias de luz. ¡Esto es crucial para su funcionamiento y precisión!",
+    text: "Los láseres pueden formar ondas estacionarias de luz, lo cual es fundamental para su funcionamiento y precisión.",
     color: "sky"
   },
   {
     icon: <Star className="text-pink-400 h-8 w-8" />,
-    text: "Algunos animales, como los delfines, usan ondas de sonido y sus ecos (¡ondas estacionarias!) para 'ver' en el agua. ¡Increíble ecolocalización!",
+    text: "Algunos animales, como los delfines, usan ondas sonoras y sus ecos (ondas estacionarias) para la ecolocalización en el agua.",
     color: "pink"
   },
   {
     icon: <Lightbulb className="text-lime-400 h-8 w-8" />,
-    text: "Si alguna vez has visto patrones bonitos en la arena de un plato que vibra (figuras de Chladni), ¡eso es por ondas estacionarias!",
+    text: "Los patrones formados por arena sobre una placa vibrante (figuras de Chladni) son una manifestación visual de las ondas estacionarias.",
     color: "lime"
+  },
+  {
+    icon: <Feather className="text-purple-400 h-8 w-8" />,
+    text: "Las ondas estacionarias son clave en la levitación acústica, permitiendo que pequeños objetos floten en el aire mediante sonido.",
+    color: "purple"
   }
 ];
 
@@ -57,7 +62,7 @@ export function FunFacts() {
             {currentFact.icon}
           </motion.div>
           <div>
-            <h3 className={`text-xl font-bold neon-text-${currentFact.color} mb-1`}>¡Dato Curioso!</h3>
+            <h3 className={`text-xl font-bold neon-text-${currentFact.color} mb-1`}>Dato Relevante</h3>
             <motion.p 
               key={currentFactIndex + "text"} 
               initial={{ opacity: 0, x: -20 }}

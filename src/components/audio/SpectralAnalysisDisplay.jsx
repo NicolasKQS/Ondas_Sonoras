@@ -1,13 +1,15 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Volume2, Zap, BarChartBig } from 'lucide-react';
+import { Volume2, Zap, BarChartBig, StickyNote as MusicNote } from 'lucide-react';
+import { freqToNote } from '@/lib/audio-analysis';
 
 export function SpectralAnalysisDisplay({ fundamentalFreq, harmonics }) {
+  const note = fundamentalFreq > 0 ? freqToNote(fundamentalFreq) : "N/A";
   return (
     <div className="glass-effect-dark p-6 md:p-8 rounded-2xl shadow-xl h-full flex flex-col">
       <h3 className="text-3xl font-bold neon-text-yellow mb-6 flex items-center">
-        <Zap className="h-8 w-8 mr-3 animate-pulse"/>Análisis del Sonido
+        <Zap className="h-8 w-8 mr-3 animate-pulse"/>Análisis Espectral en Vivo
       </h3>
       {fundamentalFreq > 0 ? (
         <div className="space-y-5 flex-grow">
@@ -18,6 +20,14 @@ export function SpectralAnalysisDisplay({ fundamentalFreq, harmonics }) {
             <p className="text-green-300 text-sm font-semibold tracking-wider">FRECUENCIA PRINCIPAL</p>
             <p className="neon-text-green text-5xl font-bold my-1.5">{fundamentalFreq} <span className="text-3xl">Hz</span></p>
           </motion.div>
+
+          <motion.div 
+            initial={{scale:0.8, opacity:0}} animate={{scale:1, opacity:1}} transition={{delay:0.15, type:"spring", stiffness:200}}
+            className="bg-sky-700/25 rounded-lg p-4 text-center shadow-md border-2 border-sky-500/50"
+          >
+            <p className="text-sky-300 text-xs font-semibold tracking-wider">NOTA ESTIMADA</p>
+            <p className="neon-text-sky text-3xl font-bold my-0.5">{note}</p>
+          </motion.div>
           
           {harmonics.length > 0 && (
             <motion.div 
@@ -25,7 +35,7 @@ export function SpectralAnalysisDisplay({ fundamentalFreq, harmonics }) {
               className="bg-blue-700/25 rounded-lg p-5"
             >
               <p className="text-blue-300 font-semibold mb-3 text-center text-sm tracking-wider flex items-center justify-center">
-                <BarChartBig className="h-5 w-5 mr-2"/> ARMÓNICOS (MÁS NOTAS)
+                <BarChartBig className="h-5 w-5 mr-2"/> ARMÓNICOS (TOP 6)
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                 {harmonics.slice(0,6).map((h, i) => ( 

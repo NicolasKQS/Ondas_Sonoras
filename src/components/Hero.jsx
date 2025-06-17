@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Music, Aperture, BookOpen } from 'lucide-react';
+import { Zap, Music, Aperture, BookOpen, Radio, Rocket, Rocket as Meteor } from 'lucide-react';
 
 export function Hero() {
   return (
@@ -35,20 +35,20 @@ export function Hero() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.8 }}
         >
-          Sumérgete en el mundo de las ondas estacionarias. ¡Aprende, experimenta y sorpréndete con la física de forma divertida!
+          Sumérgete en el mundo de las ondas estacionarias y los sonidos del universo. ¡Aprende, experimenta y sorpréndete!
         </motion.p>
         
         <motion.div 
-          className="flex flex-wrap justify-center gap-6 text-md text-slate-200"
+          className="flex flex-wrap justify-center gap-4 text-sm md:text-md text-slate-200"
           initial={{ opacity:0 }}
           animate={{ opacity:1 }}
           transition={{ duration:0.5, delay:1 }}
         >
           {[
-            { icon: <BookOpen className="text-blue-400" />, text: "Teoría Clara" },
+            { icon: <BookOpen className="text-blue-400" />, text: "Explora Teoría y Usos" },
             { icon: <Music className="text-green-400" />, text: "Analiza Sonidos" },
             { icon: <Zap className="text-purple-400" />, text: "Simula Ondas" },
-            { icon: <Aperture className="text-yellow-400" />, text: "Ve Aplicaciones" },
+            { icon: <Rocket className="text-pink-400" />, text: "Sonidos Cósmicos" },
           ].map((item, i) => (
             <motion.div 
               key={item.text}
@@ -57,7 +57,7 @@ export function Hero() {
               animate={{ opacity:1, y:0 }}
               transition={{ duration:0.4, delay: 1 + i*0.15 }}
             >
-              {React.cloneElement(item.icon, { className: `${item.icon.props.className} h-6 w-6 animate-bounce-sm` })}
+              {React.cloneElement(item.icon, { className: `${item.icon.props.className} h-5 w-5 md:h-6 md:w-6 animate-bounce-sm` })}
               <span>{item.text}</span>
             </motion.div>
           ))}
