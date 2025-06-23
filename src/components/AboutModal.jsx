@@ -6,11 +6,7 @@ import { Users, X, Award, Sparkles } from 'lucide-react';
 
 const AboutModal = ({ isOpen, onClose }) => {
   const teamMembers = [
-    "Kevin Quisbert",
-    "Adalit Ticona",
-    "David Uruchi",
-    "Jhoel Contreras",
-    "Javier Patzi"
+    "Kevin Nicolas Quisbert Sanchez"
   ];
 
   const backdropVariants = {
