@@ -61,6 +61,8 @@ const AboutModal = ({ isOpen, onClose }) => {
               <p className="text-sm text-slate-300 leading-relaxed">
                 Este proyecto fue creado con pasión para hacer el aprendizaje de la física más divertido y accesible. 
                 ¡Esperamos que disfrutes explorando las maravillas de las ondas!
+                
+                Anly ❤
               </p>
             </div>
             
